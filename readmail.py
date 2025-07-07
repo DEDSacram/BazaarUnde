@@ -1,46 +1,87 @@
-from __future__ import print_function
-import os.path
 import base64
-import time
-from google.auth.transport.requests import Request
-from google_auth_oauthlib.flow import InstalledAppFlow
-from google.oauth2.credentials import Credentials
+import quopri
+import re
 from googleapiclient.discovery import build
+from google.oauth2.credentials import Credentials
 
-# If modifying these SCOPES, delete the token.json file
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly']
 
-def main():
-    creds = None
-    if os.path.exists('token.json'):
-        creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+# store what was already visited and remove it
 
-    # If no (valid) credentials available, log in via browser
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                'credentials.json', SCOPES)
-            creds = flow.run_local_server(port=0)
+def get_service():
+    creds = Credentials.from_authorized_user_file('token.json', SCOPES)
+    return build('gmail', 'v1', credentials=creds)
 
-        # Save token
-        with open('token.json', 'w') as token:
-            token.write(creds.to_json())
+def get_message_content(service, msg_id):
+    msg = service.users().messages().get(userId='me', id=msg_id, format='full').execute()
+    payload = msg['payload']
 
-    # Connect to Gmail API
-    service = build('gmail', 'v1', credentials=creds)
+    # Helper to decode a part
+    def decode_part(part):
+        data = part.get('body', {}).get('data')
+        if not data:
+            return None
 
-    # Get list of messages
-    results = service.users().messages().list(userId='me', maxResults=10).execute()
-    messages = results.get('messages', [])
+        decoded_bytes = base64.urlsafe_b64decode(data)
+        # DO NOT apply quoted-printable decoding here
+        return decoded_bytes.decode('utf-8', errors='ignore')
 
-    if not messages:
-        print('No messages found.')
+    # Case 1: Multipart email (has parts)
+    parts = payload.get('parts')
+    if parts:
+        for part in parts:
+            mime = part.get('mimeType')
+            if mime in ['text/plain', 'text/html']:
+                content = decode_part(part)
+                if content:
+                    return content
+
+    # Case 2: Single-part email
+    elif 'body' in payload and 'data' in payload['body']:
+        return decode_part(payload)
+
+    return None
+def extract_target_url(text):
+    target = "/marketplace/selling/?action=publish"
+    start = text.find(target)
+
+    if start != -1:
+        end = start
+        while end < len(text) and text[end] not in (' ', '\n'):
+            end += 1
+        result = text[start:end]
+        print("Matched:", 'https://www.facebook.com' + result)
     else:
-        print('Messages:')
-        for msg in messages:
-            print(msg['id'])
+        print("Target not found.")
+
+def main():
+    service = get_service()
+    results = service.users().messages().list(
+        userId='me',
+        q='from:noreply@marketplace.facebook.com',
+        maxResults=5
+    ).execute()
+    messages = results.get('messages', [])
+   
+    for msg in messages:
+        msg_id = msg['id']
+        content = get_message_content(service, msg_id)
+        # print(content)
+        if content:
+            target = extract_target_url(content)
+            
+        else:
+            print(f"[ERROR] Could not read message {msg_id}")
 
 if __name__ == '__main__':
     main()
+
+
+# https://www.facebook.com
+
+# /marketplace/selling/?action=3Dpublish&token=3DE7GTWXM4lml6NHjaMeOwiQSwX2yQ=
+# iOiC3poAHal7W870ip76SqwWO2fMTXPFcNNj&listing_id=3D1095907759094146
+
+
+
+

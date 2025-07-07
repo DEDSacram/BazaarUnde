@@ -229,7 +229,7 @@ except Exception as e:
 # logged in now
 
 # 4. Fill Email
-fill_input(driver, By.XPATH, "//input[@type='email']", "example@example.com", label="Email")
+fill_input(driver, By.XPATH, "//input[@type='email']", "", label="Email")
 
 # 5. Upload Photos
 try:
